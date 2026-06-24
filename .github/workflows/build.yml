@@ -7,28 +7,56 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4 
-
     - name: Set up Go
-      uses: actions/setup-go@v5 
+      uses: actions/setup-go@v5
       with:
         go-version: '1.22'
 
-    - name: Initialize and Compile
+    - name: Clone Hysteria 2 Source
       run: |
-        # 1. 初始化 Go 模块
-        go mod init hy2so
+        # 1. 克隆官方最新 v2.4.0 源码
+        git clone -b app/v2.4.0 https://github.com/apernet/hysteria.git
         
-        # 2. 拉取 Hysteria 2 官方源码依赖 (包含 Realms 功能的最新版)
-        go get github.com/apernet/hysteria/app/cmd@latest
+    - name: Inject CGO Wrapper
+      run: |
+        # 2. 将我们的导出函数，直接注入到官方源码的 main 包中
+        cd hysteria/app
+        cat << 'EOF' > export.go
+        package main
+
+        import "C"
+        import (
+            "os"
+            "github.com/apernet/hysteria/app/cmd"
+        )
+
+        //export StartHysteria2
+        func StartHysteria2(configPath *C.char) C.int {
+            // 解析 Node.js 传过来的配置文件路径
+            path := C.GoString(configPath)
+            
+            // 伪造命令行参数，相当于执行: hysteria server -c config.yaml
+            os.Args = []string{"hysteria", "server", "-c", path}
+            
+            // 在后台启动 Hysteria
+            go func() {
+                cmd.Execute()
+            }()
+            
+            return 0
+        }
+        EOF
+
+    - name: Compile SO
+      run: |
+        # 3. 在官方源码目录下就地编译！
+        cd hysteria/app
         go mod tidy
-        
-        # 3. 开启 CGO，编译为 Linux amd64 架构的共享库 (.so)
-        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=c-shared -ldflags="-w -s" -o hy2-amd64.so main.go
+        # 编译为共享库，并开启极致压缩 (-w -s)
+        CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -buildmode=c-shared -ldflags="-w -s" -o ../../hy2-amd64.so .
 
     - name: Upload SO File
-      uses: actions/upload-artifact@v4 # 【核心修复点】升级为 v4
+      uses: actions/upload-artifact@v4
       with:
         name: hy2-so-linux-amd64
         path: hy2-amd64.so
