@@ -1,0 +1,30 @@
+name: Build Hysteria2 Custom Binary
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Clone Hysteria 2 Source
+      run: |
+        git clone -b app/v2.4.0 https://github.com/apernet/hysteria.git
+        
+    - name: Compile Custom Binary
+      run: |
+        cd hysteria/app
+        go mod tidy
+        # 【核心修改】彻底禁用 CGO，编译纯静态可执行文件，极度缩小体积并改变哈希特征
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ../../hy2-custom-amd64 .
+
+    - name: Upload Binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: hy2-custom-linux-amd64
+        path: hy2-custom-amd64
